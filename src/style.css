@@ -5,6 +5,25 @@
   position: relative;
   max-height: 100%; /* Prevent it from growing beyond the parent */
   overflow: hidden; /* Prevents content from overflowing */
+  min-width: 240px; /* Increase minimum width for better readability */
+  width: 100%; /* Use full width of the sidebar */
+}
+
+/* Force sidebar to be wider */
+#sidebar, 
+aside[class*="sidebar"],
+[role="navigation"] {
+  min-width: 260px !important;
+  width: 260px !important;
+}
+
+/* Force the menu container to be wider */
+.menu-container,
+#side-menu,
+.side-menu,
+[class*="_menuContent_"] {
+  min-width: 260px !important;
+  width: 260px !important;
 }
 
 #folder-view-header {
@@ -62,6 +81,7 @@
   flex-grow: 1; /* Allows it to expand within the available space */
   max-height: calc(100% - 60px); /* Adjust max-height dynamically */
   overflow-y: auto; /* Enables scrolling */
+  width: 100%;
 }
 
 .folder-list-item {
@@ -72,6 +92,9 @@
   align-items: center;
   display: flex;
   position: relative;
+  z-index: 1; /* Ensure clickability */
+  transition: background-color 0.2s;
+  width: 100%;
 }
 
 .folder-list-item:not(:first-child) {
@@ -81,6 +104,8 @@
 .folder-list-item-icon {
   margin-right: 13px;
   display: inline-block;
+  font-size: 16px; /* Larger icon */
+  min-width: 16px; /* Ensure consistent width */
 }
 
 .folder-list-item-name {
@@ -91,7 +116,10 @@
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  max-width: calc(100% - 60px);
+  flex-grow: 1;
+  min-width: 80px; /* Increase minimum width for better text visibility */
+  max-width: calc(100% - 80px); /* Ensure it doesn't overflow */
+  font-weight: 600; /* Make text bolder for better visibility */
 }
 
 .folder-list-item-count {
@@ -102,6 +130,62 @@
   font-size: 12px;
   min-width: 24px;
   text-align: center;
+  flex-shrink: 0; /* Prevent count from shrinking */
+}
+
+/* Add styles for the remove button */
+.folder-remove-btn {
+  visibility: hidden;
+  background: none;
+  border: none;
+  color: #C3C9D5;
+  cursor: pointer;
+  margin-left: 8px;
+  opacity: 0.6;
+  padding: 4px;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0; /* Prevent button from shrinking */
+  z-index: 2; /* Ensure button is clickable */
+}
+
+.folder-remove-btn:hover {
+  opacity: 1;
+  color: #ff4d4f;
+}
+
+.folder-list-item:hover .folder-remove-btn {
+  visibility: visible;
+}
+
+/* Make clickable area larger */
+.folder-remove-btn i {
+  padding: 4px;
+}
+
+/* Style for the cleanup button at the bottom */
+#folder-actions {
+  padding: 0 12px 12px;
+  display: flex;
+  justify-content: center;
+}
+
+#folder-cleanup-btn {
+  background-color: #333;
+  color: #C3C9D5;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  width: 100%; /* Make button wider */
+}
+
+#folder-cleanup-btn:hover {
+  background-color: #444;
 }
 
 .tooltip {
@@ -149,6 +233,18 @@
 .folder-list-item:hover,
 .folder-list-item.is-active {
   background-color: #525456;
+}
+
+/* Ensure folder items are clickable when active */
+.folder-list-item.is-active {
+  background-color: #525456;
+  position: relative;
+  z-index: 1;
+}
+
+/* More visible hover state */
+.folder-list-item:hover {
+  background-color: #414446;
 }
 
 #folder-list::-webkit-scrollbar {

@@ -6,6 +6,7 @@ const TEMPLATES = {
       </span>
       <span class="folder-list-item-name">${tagname}</span>
       <span class="folder-list-item-count">${count}</span>
+      ${tagname !== 'All' ? '<button class="folder-remove-btn" title="Remove folder"><i class="el-icon-delete"></i></button>' : ''}
       <div class="tooltip">${tagname} (${count} workflows)</div>
     </div>
   `,
@@ -28,6 +29,9 @@ const TEMPLATES = {
       <div id="folder-list">
       </div>
       <hr class="divider"/>
+      <div id="folder-actions">
+        <button id="folder-cleanup-btn" title="Remove unused folders">Clean Up</button>
+      </div>
     </div>
   `
 };
@@ -36,7 +40,9 @@ const TEMPLATES = {
 const state = {
   tags: {},
   selectedTag: null,
-  sortOrder: 'name-asc'
+  sortOrder: 'name-asc',
+  allTags: {}, // New property to store all tags ever seen
+  lastSyncTime: 0 // Track when we last synced with actual tags
 };
 
 /**
@@ -110,13 +116,83 @@ function sortFolders() {
 }
 
 /**
+ * Shows a loading indicator immediately when the extension initializes
+ */
+function showInitialLoadingIndicator() {
+  // Try to find the sidebar early
+  const possibleSidebarContainers = [
+    '#sidebar',
+    '[class*="sidebar"]',
+    '[role="navigation"]',
+    'aside'
+  ];
+  
+  let container = null;
+  for (const selector of possibleSidebarContainers) {
+    container = document.querySelector(selector);
+    if (container) break;
+  }
+  
+  if (!container) {
+    // If we can't find the sidebar yet, add to body and it will be moved later
+    container = document.body;
+  }
+  
+  // Create a minimal container with just the loading spinner
+  const tempContainer = document.createElement('div');
+  tempContainer.id = 'n8n-folder-view-loading';
+  tempContainer.innerHTML = `
+    <div style="color: #C3C9D5; padding: 16px 12px; margin-top: 10px;">
+      <h3 style="margin: 0; font-size: 16px; font-weight: 500;">Loading Folders...</h3>
+      <div class="loading-spinner" style="
+        width: 20px; 
+        height: 20px; 
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #C3C9D5;
+        animation: spin 1s linear infinite;
+        margin: 10px auto;
+      "></div>
+      <style>
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      </style>
+    </div>
+  `;
+  
+  // Add to the page
+  container.appendChild(tempContainer);
+  
+  console.log('n8n Folder View: Displayed initial loading indicator');
+}
+
+// Run this immediately
+showInitialLoadingIndicator();
+
+/**
  * Creates the initial folder view container with loading spinner.
  * @returns {Promise<boolean>} Whether the container was successfully created
  */
 async function createInitialContainer() {
   try {
+    // Remove any temporary loading indicator
+    const tempLoader = document.getElementById('n8n-folder-view-loading');
+    if (tempLoader) {
+      tempLoader.remove();
+    }
+    
     // Wait for the sidebar to be available
     const sidebar = await waitForSidebar();
+    
+    // Check if the sidebar is narrow and apply width fix
+    const sidebarRect = sidebar.getBoundingClientRect();
+    if (sidebarRect.width < 250) {
+      sidebar.style.minWidth = '260px';
+      sidebar.style.width = '260px';
+      console.log('n8n Folder View: Applied sidebar width fix');
+    }
     
     // Find the element to insert our folder view
     // Try multiple selectors to find the right place
@@ -153,6 +229,15 @@ async function createInitialContainer() {
     const loadingSpinner = document.querySelector('#folder-loading');
     if (loadingSpinner) {
       loadingSpinner.style.display = 'block';
+      
+      // Safety timeout - hide spinner after 10 seconds no matter what
+      // This prevents indefinite spinner if something goes wrong
+      setTimeout(() => {
+        if (loadingSpinner && loadingSpinner.style.display !== 'none') {
+          console.log('n8n Folder View: Force hiding spinner after timeout');
+          loadingSpinner.style.display = 'none';
+        }
+      }, 10000);
     }
     
     return true;
@@ -168,65 +253,141 @@ async function createInitialContainer() {
  * @param {Object} tagData - Object containing tag names as keys and counts as values.
  */
 function createFolderView(tagData) {
-  // Save to state
-  state.tags = tagData;
-  
-  const addFolderListItem = (tagname, count = 0) => {
-    document.querySelector('#folder-list').insertAdjacentHTML('beforeend', TEMPLATES.folderItem(tagname, count));
-  }
+  try {
+    // Save to state
+    state.tags = tagData;
+    
+    const addFolderListItem = (tagname, count = 0) => {
+      document.querySelector('#folder-list').insertAdjacentHTML('beforeend', TEMPLATES.folderItem(tagname, count));
+    }
 
-  const handleFolderListItemClick = (event) => {
-    const folderListItem = event.target.closest('.folder-list-item');
-    if (folderListItem) {
-      const tagName = folderListItem.dataset.tag;
-      state.selectedTag = tagName;
+    const handleFolderListItemClick = (event) => {
+      // Don't trigger if the remove button was clicked
+      if (event.target.closest('.folder-remove-btn')) {
+        return;
+      }
+
+      const folderListItem = event.target.closest('.folder-list-item');
+      if (folderListItem) {
+        const tagName = folderListItem.dataset.tag;
+        console.log(`n8n Folder View: Folder clicked: ${tagName}`);
+        state.selectedTag = tagName;
+        saveState();
+        applyActive(folderListItem);
+        filterWorkflowsByTag(tagName);
+      }
+    }
+
+    const handleRemoveButtonClick = (event) => {
+      const button = event.target.closest('.folder-remove-btn');
+      if (!button) return;
+      
+      event.stopPropagation(); // Prevent folder selection
+
+      const folderItem = button.closest('.folder-list-item');
+      const tagName = folderItem.dataset.tag;
+      
+      if (confirm(`Remove folder "${tagName}"?`)) {
+        // Remove from allTags
+        delete state.allTags[tagName];
+        
+        // If the removed folder was selected, select "All" instead
+        if (state.selectedTag === tagName) {
+          state.selectedTag = 'All';
+          
+          // Navigate to All (unfiltered view)
+          filterWorkflowsByTag('All');
+        }
+        
+        saveState();
+        
+        // Redraw the folder list
+        preserveFolderList();
+      }
+    }
+
+    const handleCleanupButtonClick = (event) => {
+      event.preventDefault();
+      
+      if (confirm('Remove all unused folders? This will keep only folders for tags that currently exist in your workflows.')) {
+        performTagCleanup(true);
+      }
+    }
+
+    const handleSortChange = (event) => {
+      state.sortOrder = event.target.value;
       saveState();
-      filterWorkflowsByTag(tagName);
-      applyActive(folderListItem);
+      sortFolders();
+    }
+
+    // Add the All folder first
+    const totalCount = Object.values(tagData).reduce((sum, count) => sum + count, 0);
+    addFolderListItem('All', totalCount);
+
+    // Sort the tags by name by default
+    const sortedTags = Object.keys(tagData).sort((a, b) => a.localeCompare(b));
+    sortedTags.forEach(tagName => {
+      addFolderListItem(tagName, tagData[tagName]);
+    });
+
+    // Add event listeners
+    const folderItems = document.querySelectorAll('.folder-list-item');
+    folderItems.forEach(item => {
+      item.addEventListener('mouseenter', updateTooltipPosition);
+      item.addEventListener('mousemove', updateTooltipPosition);
+      // Add direct click handler to each folder item for better reliability
+      item.addEventListener('click', (e) => {
+        // Skip if clicking on the delete button
+        if (!e.target.closest('.folder-remove-btn')) {
+          const tagName = item.dataset.tag;
+          console.log(`n8n Folder View: Direct folder click: ${tagName}`);
+          state.selectedTag = tagName;
+          saveState();
+          applyActive(item);
+          filterWorkflowsByTag(tagName);
+        }
+      });
+    });
+
+    // Still add the list-level click handler as a backup
+    const folderList = document.querySelector('#folder-list');
+    if (folderList) {
+      folderList.addEventListener('click', handleFolderListItemClick);
+      
+      // Add listener for remove buttons
+      folderList.addEventListener('click', handleRemoveButtonClick);
+    }
+
+    // Add cleanup button listener
+    const cleanupButton = document.querySelector('#folder-cleanup-btn');
+    if (cleanupButton) {
+      cleanupButton.addEventListener('click', handleCleanupButtonClick);
+    }
+
+    // Add sort event listener
+    const sortSelect = document.querySelector('#folder-sort-select');
+    if (sortSelect) {
+      sortSelect.value = state.sortOrder;
+      sortSelect.addEventListener('change', handleSortChange);
+    }
+
+    // Explicitly hide loading spinner at the end of folder view creation
+    const loadingSpinner = document.querySelector('#folder-loading');
+    if (loadingSpinner) {
+      loadingSpinner.style.display = 'none';
+    }
+
+    // Restore selection if one exists
+    restoreState();
+  } catch (error) {
+    console.error('n8n Folder View: Error creating folder view', error);
+    
+    // Make sure spinner is hidden even if there's an error
+    const loadingSpinner = document.querySelector('#folder-loading');
+    if (loadingSpinner) {
+      loadingSpinner.style.display = 'none';
     }
   }
-
-  const handleSortChange = (event) => {
-    state.sortOrder = event.target.value;
-    saveState();
-    sortFolders();
-  }
-
-  // Add the All folder first
-  const totalCount = Object.values(tagData).reduce((sum, count) => sum + count, 0);
-  addFolderListItem('All', totalCount);
-
-  // Sort the tags by name by default
-  const sortedTags = Object.keys(tagData).sort((a, b) => a.localeCompare(b));
-  sortedTags.forEach(tagName => {
-    addFolderListItem(tagName, tagData[tagName]);
-  });
-
-  // Add event listeners
-  const folderItems = document.querySelectorAll('.folder-list-item');
-  folderItems.forEach(item => {
-    item.addEventListener('mouseenter', updateTooltipPosition);
-    item.addEventListener('mousemove', updateTooltipPosition);
-  });
-
-  const folderList = document.querySelector('#folder-list');
-  folderList.addEventListener('click', handleFolderListItemClick);
-
-  // Add sort event listener
-  const sortSelect = document.querySelector('#folder-sort-select');
-  if (sortSelect) {
-    sortSelect.value = state.sortOrder;
-    sortSelect.addEventListener('change', handleSortChange);
-  }
-
-  // Hide loading spinner
-  const loadingSpinner = document.querySelector('#folder-loading');
-  if (loadingSpinner) {
-    loadingSpinner.style.display = 'none';
-  }
-
-  // Restore selection if one exists
-  restoreState();
 }
 
 /**
@@ -250,6 +411,10 @@ async function applyActive(folderItem) {
  * @param {string} tagName - The name of the tag to filter workflows by.
  */
 async function filterWorkflowsByTag(tagName) {
+  // Store the currently selected tag before filtering
+  state.selectedTag = tagName;
+  saveState();
+  
   // Handle "All" folder to show all workflows
   if (tagName === 'All') {
     const removeFiltersButton = await waitQuerySelector('a[data-test-id="workflows-filter-reset"]', null, 2000).catch(() => null);
@@ -327,9 +492,10 @@ async function filterWorkflowsByTag(tagName) {
 /**
  * Extracts and returns an object of tag names with their counts.
  *
+ * @param {boolean} updateAllTags - Whether to update the allTags state with the results
  * @returns {Promise<Object>} A promise that resolves to an object with tag names as keys and counts as values.
  */
-async function extractTagNamesWithCounts() {
+async function extractTagNamesWithCounts(updateAllTags = true) {
   let retryCount = 0;
   const maxRetries = 5;
   
@@ -399,6 +565,22 @@ async function extractTagNamesWithCounts() {
         });
       }
       
+      // If we are to update allTags and we found some tags
+      if (updateAllTags && Object.keys(tagCountMap).length > 0) {
+        // Merge new tags into allTags
+        Object.keys(tagCountMap).forEach(tag => {
+          // Only update count if higher than existing
+          if (!state.allTags[tag] || tagCountMap[tag] > state.allTags[tag]) {
+            state.allTags[tag] = tagCountMap[tag];
+          }
+        });
+      }
+      
+      if (updateAllTags) {
+        // Update the last sync time
+        state.lastSyncTime = Date.now();
+      }
+      
       console.log(`n8n Folder View: Extracted ${Object.keys(tagCountMap).length} unique tags:`, Object.keys(tagCountMap));
       return tagCountMap;
     } catch (error) {
@@ -462,7 +644,9 @@ function saveState() {
   try {
     localStorage.setItem('n8nFolderView', JSON.stringify({
       selectedTag: state.selectedTag,
-      sortOrder: state.sortOrder
+      sortOrder: state.sortOrder,
+      allTags: state.allTags, // Also save all tags
+      lastSyncTime: state.lastSyncTime // Save last sync time
     }));
   } catch (error) {
     console.warn('n8n Folder View: Failed to save state', error);
@@ -485,6 +669,10 @@ function restoreState() {
         sortFolders();
       }
       
+      if (savedState.allTags) {
+        state.allTags = savedState.allTags;
+      }
+      
       if (savedState.selectedTag) {
         state.selectedTag = savedState.selectedTag;
         const folderItems = document.querySelectorAll('.folder-list-item');
@@ -496,6 +684,10 @@ function restoreState() {
           applyActive(targetItem);
           filterWorkflowsByTag(state.selectedTag);
         }
+      }
+      
+      if (savedState.lastSyncTime) {
+        state.lastSyncTime = savedState.lastSyncTime;
       }
     }
   } catch (error) {
@@ -524,52 +716,17 @@ function setupTagObserver() {
       // Wait a moment for any changes to complete
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      const tagData = await extractTagNamesWithCounts();
-      if (Object.keys(tagData).length === 0) {
-        console.warn('n8n Folder View: No tags found after DOM changes');
-        return;
-      }
-      
-      const folderList = document.querySelector('#folder-list');
-      
-      if (folderList && Object.keys(tagData).length > 0) {
-        // Remember the currently selected tag
-        const activeTag = state.selectedTag;
-        
-        // Remove all existing folders
-        while (folderList.firstChild) {
-          folderList.removeChild(folderList.firstChild);
-        }
-        
-        // Recreate the folder view with updated tags
-        state.tags = tagData;
-        
-        // Add the All folder first
-        const totalCount = Object.values(tagData).reduce((sum, count) => sum + count, 0);
-        folderList.insertAdjacentHTML('beforeend', TEMPLATES.folderItem('All', totalCount));
-        
-        // Add all the tag folders
-        Object.entries(tagData).forEach(([tagName, count]) => {
-          folderList.insertAdjacentHTML('beforeend', TEMPLATES.folderItem(tagName, count));
-        });
-        
-        // Re-add event listeners
-        const folderItems = document.querySelectorAll('.folder-list-item');
-        folderItems.forEach(item => {
-          item.addEventListener('mouseenter', updateTooltipPosition);
-          item.addEventListener('mousemove', updateTooltipPosition);
-        });
-        
-        sortFolders();
-        
-        // Restore active state
-        if (activeTag) {
-          const targetItem = Array.from(folderItems).find(item => item.dataset.tag === activeTag);
-          if (targetItem) {
-            applyActive(targetItem);
-          }
+      // If we're not currently filtering, update the all tags list
+      if (state.selectedTag === 'All' || !state.selectedTag) {
+        const tagData = await extractTagNamesWithCounts(true);
+        if (Object.keys(tagData).length === 0) {
+          console.warn('n8n Folder View: No tags found after DOM changes');
+          return;
         }
       }
+      
+      // Regardless of filtering state, update the folder list using all known tags
+      await preserveFolderList();
     }
   });
   
@@ -676,6 +833,155 @@ async function waitForSidebar(maxAttempts = 20, interval = 500) {
   });
 }
 
+/**
+ * Performs a cleanup of tags that no longer exist in any workflows
+ * 
+ * @param {boolean} force - Whether to force cleanup even if not due for a sync
+ * @returns {Promise<number>} Number of tags removed
+ */
+async function performTagCleanup(force = false) {
+  // Only do cleanup if forced or if it's been more than 24 hours since last sync
+  const ONE_DAY = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  if (!force && Date.now() - state.lastSyncTime < ONE_DAY) {
+    console.log('n8n Folder View: Tag cleanup skipped, not due yet');
+    return 0;
+  }
+  
+  console.log('n8n Folder View: Starting tag cleanup');
+  
+  // Extract currently existing tags
+  const currentTags = await extractTagNamesWithCounts(false);
+  
+  // Count how many tags we're removing
+  let removedCount = 0;
+  
+  // Remove tags from allTags that don't exist in currentTags
+  for (const tag in state.allTags) {
+    if (tag !== 'All' && !currentTags[tag]) {
+      delete state.allTags[tag];
+      removedCount++;
+    }
+  }
+  
+  // If any were removed, update the UI
+  if (removedCount > 0) {
+    console.log(`n8n Folder View: Removed ${removedCount} unused tags`);
+    
+    // Update last sync time
+    state.lastSyncTime = Date.now();
+    
+    saveState();
+    await preserveFolderList();
+  } else {
+    console.log('n8n Folder View: No unused tags found');
+  }
+  
+  return removedCount;
+}
+
+/**
+ * Preserves the full folder list even when filtering
+ * @param {boolean} forceRefresh - Whether to force a refresh of all folders
+ */
+async function preserveFolderList(forceRefresh = false) {
+  try {
+    // When filtering happens, we should use the comprehensive allTags list
+    // rather than just what's currently visible on the page
+    if (forceRefresh || Object.keys(state.allTags).length === 0) {
+      // Initial load, get all tags
+      const tagData = await extractTagNamesWithCounts(true);
+      if (Object.keys(tagData).length === 0) {
+        console.warn('n8n Folder View: No tags found for initial load');
+        // Use fallback tags if needed
+        if (Object.keys(state.allTags).length === 0) {
+          state.allTags = {
+            'sample-tag-1': 1,
+            'sample-tag-2': 2,
+            'dialer': 3,
+            'jason steele': 2,
+            'avison young': 1
+          };
+        }
+      }
+    }
+
+    // Use the stored allTags instead of the current visible tags
+    const folderList = document.querySelector('#folder-list');
+    if (!folderList) return;
+    
+    // Remember the currently selected tag
+    const activeTag = state.selectedTag;
+    
+    // Remove all existing folders
+    while (folderList.firstChild) {
+      folderList.removeChild(folderList.firstChild);
+    }
+    
+    // Add the All folder first
+    const totalCount = Object.values(state.allTags).reduce((sum, count) => sum + count, 0);
+    folderList.insertAdjacentHTML('beforeend', TEMPLATES.folderItem('All', totalCount));
+    
+    // Add all the tag folders using the comprehensive list
+    Object.entries(state.allTags).forEach(([tagName, count]) => {
+      folderList.insertAdjacentHTML('beforeend', TEMPLATES.folderItem(tagName, count));
+    });
+    
+    // Re-add event listeners and ensure folders are clickable
+    const folderItems = document.querySelectorAll('.folder-list-item');
+    folderItems.forEach(item => {
+      item.addEventListener('mouseenter', updateTooltipPosition);
+      item.addEventListener('mousemove', updateTooltipPosition);
+      
+      // Make sure each folder is clickable with a direct handler
+      item.addEventListener('click', (event) => {
+        if (!event.target.closest('.folder-remove-btn')) {
+          const tagName = item.dataset.tag;
+          console.log(`n8n Folder View: Direct folder click on ${tagName}`);
+          state.selectedTag = tagName;
+          saveState();
+          applyActive(item);
+          filterWorkflowsByTag(tagName);
+          
+          // Force event propagation to stop
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }, true);
+    });
+    
+    sortFolders();
+    
+    // Restore active state
+    if (activeTag) {
+      const targetItem = Array.from(folderItems).find(item => 
+        item.dataset.tag === activeTag
+      );
+      if (targetItem) {
+        applyActive(targetItem);
+      }
+    }
+    
+    // Optionally, clean up tags that no longer exist
+    // We do this occasionally to keep the folder list tidy
+    if (Math.random() < 0.1) { // 10% chance to check on each folder refresh
+      performTagCleanup();
+    }
+    
+    // Ensure loading spinner is hidden after this operation completes
+    const loadingSpinner = document.querySelector('#folder-loading');
+    if (loadingSpinner) {
+      loadingSpinner.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('n8n Folder View: Error preserving folder list', error);
+    // Make sure spinner is hidden even if there's an error
+    const loadingSpinner = document.querySelector('#folder-loading');
+    if (loadingSpinner) {
+      loadingSpinner.style.display = 'none';
+    }
+  }
+}
+
 async function main() {
   try {
     console.log('n8n Folder View: Starting extension');
@@ -692,22 +998,12 @@ async function main() {
     console.log('n8n Folder View: Waiting for page to stabilize before extracting tags');
     await new Promise(resolve => setTimeout(resolve, 2000));
     
-    const tagData = await extractTagNamesWithCounts();
-    if (Object.keys(tagData).length === 0) {
-      console.warn('n8n Folder View: No tags found');
-      // Add a fallback for testing
-      console.log('n8n Folder View: Adding fallback tags for testing');
-      const fallbackTags = {
-        'sample-tag-1': 1,
-        'sample-tag-2': 2,
-        'dialer': 3,
-        'jason steele': 2,
-        'avison young': 1
-      };
-      createFolderView(fallbackTags);
-    } else {
-      console.log(`n8n Folder View: Found ${Object.keys(tagData).length} tags`);
-      createFolderView(tagData);
+    // Use the new preserveFolderList function to handle tag extraction and folder creation
+    await preserveFolderList(true);
+    
+    // Do an initial tag cleanup if it's been a long time
+    if (Date.now() - state.lastSyncTime > 7 * 24 * 60 * 60 * 1000) { // 1 week
+      await performTagCleanup(true);
     }
     
     setupTagObserver();
@@ -732,9 +1028,10 @@ async function main() {
   }
 }
 
-// Wait a bit longer before starting to ensure the page is fully loaded
+// Start loading indicator immediately to give visual feedback
+// Wait until the page is fully loaded before running main function
 if (document.readyState === 'complete') {
-  setTimeout(main, 1000);
+  main();
 } else {
-  window.addEventListener('load', () => setTimeout(main, 1000));
+  window.addEventListener('load', main);
 }
