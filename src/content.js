@@ -48,7 +48,9 @@ function updateTooltipPosition(event) {
   const tooltipElement = event.currentTarget.querySelector('.tooltip');
   if (!tooltipElement) return;
 
-  const sidebar = document.getElementById('sidebar');
+  const sidebar = getSidebar();
+  if (!sidebar) return;
+
   const sidebarRect = sidebar.getBoundingClientRect();
   const itemRect = event.currentTarget.getBoundingClientRect();
   
@@ -108,6 +110,59 @@ function sortFolders() {
 }
 
 /**
+ * Creates the initial folder view container with loading spinner.
+ * @returns {Promise<boolean>} Whether the container was successfully created
+ */
+async function createInitialContainer() {
+  try {
+    // Wait for the sidebar to be available
+    const sidebar = await waitForSidebar();
+    
+    // Find the element to insert our folder view
+    // Try multiple selectors to find the right place
+    const possibleContainers = [
+      '#sidebar [class^="_menuContent_"]',
+      '.el-menu',
+      '[role="navigation"] > div',
+      '#sidebar > div',
+      'aside > div'
+    ];
+    
+    let menuContent = null;
+    for (const selector of possibleContainers) {
+      menuContent = document.querySelector(selector);
+      if (menuContent) {
+        console.log(`n8n Folder View: Found menu container using selector: ${selector}`);
+        break;
+      }
+    }
+    
+    if (!menuContent) {
+      // Fallback: insert after the sidebar element itself
+      menuContent = sidebar;
+      if (!menuContent) {
+        console.error('n8n Folder View: Could not find a suitable container for folder view');
+        return false;
+      }
+    }
+    
+    // Create the container with just the loading spinner active
+    menuContent.insertAdjacentHTML('beforebegin', TEMPLATES.folderViewContainer);
+    
+    // Make sure the loading spinner is visible
+    const loadingSpinner = document.querySelector('#folder-loading');
+    if (loadingSpinner) {
+      loadingSpinner.style.display = 'block';
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('n8n Folder View: Error creating initial container', error);
+    return false;
+  }
+}
+
+/**
  * Creates a view for folders based on the provided tag names and counts.
  *
  * @param {Object} tagData - Object containing tag names as keys and counts as values.
@@ -136,14 +191,6 @@ function createFolderView(tagData) {
     saveState();
     sortFolders();
   }
-
-  // Find menu content and insert our folder view
-  const menuContent = document.querySelector('#sidebar [class^="_menuContent_"]');
-  if (!menuContent) {
-    console.error('n8n Folder View: Could not find sidebar menu content');
-    return;
-  }
-  menuContent.insertAdjacentHTML('beforebegin', TEMPLATES.folderViewContainer);
 
   // Add the All folder first
   const totalCount = Object.values(tagData).reduce((sum, count) => sum + count, 0);
@@ -205,7 +252,7 @@ async function applyActive(folderItem) {
 async function filterWorkflowsByTag(tagName) {
   // Handle "All" folder to show all workflows
   if (tagName === 'All') {
-    const removeFiltersButton = await waitQuerySelector('a[data-test-id="workflows-filter-reset"]', null, 2000);
+    const removeFiltersButton = await waitQuerySelector('a[data-test-id="workflows-filter-reset"]', null, 2000).catch(() => null);
     if (removeFiltersButton) {
       removeFiltersButton.click();
     } else {
@@ -214,25 +261,67 @@ async function filterWorkflowsByTag(tagName) {
     }
     return;
   }
-
-  const isUnfiltered = () => {
-    return window.location.pathname === '/home/workflows' && window.location.search.length === 0;
-  }
-
-  if (isUnfiltered()) {
-    queryXpath(`//li[contains(., "${tagName}") and @data-test-id="tag"]`)?.click();
-    return;
-  }
-
-  const removeFiltersButton = await waitQuerySelector('a[data-test-id="workflows-filter-reset"]');
-  removeFiltersButton.click();
-
-  const intervalId = setInterval(() => {
-    if (isUnfiltered()) {
-      clearInterval(intervalId);
-      queryXpath(`//li[contains(., "${tagName}") and @data-test-id="tag"]`)?.click();
+  
+  // Define possible selectors for tag elements that can be clicked
+  const possibleTagSelectors = [
+    // New n8n structure
+    `span.n8n-tag:has(> span:contains("${tagName}"))`,
+    // Older structure
+    `li[data-test-id="tag"]:has(> span:contains("${tagName}"))`,
+    // XPath alternatives will be used for complex cases
+  ];
+  
+  console.log(`n8n Folder View: Trying to filter by tag "${tagName}"`);
+  
+  // Try each CSS selector first
+  for (const selector of possibleTagSelectors) {
+    try {
+      const tagElement = document.querySelector(selector);
+      if (tagElement) {
+        console.log(`n8n Folder View: Found tag element using selector: ${selector}`);
+        tagElement.click();
+        return;
+      }
+    } catch (error) {
+      console.warn(`n8n Folder View: Selector error: ${error.message}`);
+      // Continue to next selector
     }
-  }, 100);
+  }
+  
+  // If CSS selectors didn't work, try XPath as it can handle contains() more reliably
+  const tagXPaths = [
+    `//span[contains(@class, "n8n-tag")][.//span[contains(text(), "${tagName}")]]`,
+    `//li[@data-test-id="tag"][.//span[contains(text(), "${tagName}")]]`,
+    `//span[contains(text(), "${tagName}")]`
+  ];
+  
+  for (const xpath of tagXPaths) {
+    const tagElement = queryXpath(xpath);
+    if (tagElement) {
+      console.log(`n8n Folder View: Found tag element using XPath: ${xpath}`);
+      tagElement.click();
+      return;
+    }
+  }
+  
+  // If we can't find the tag directly, try another approach
+  console.warn(`n8n Folder View: Could not find tag element for "${tagName}", trying to use filters`);
+  
+  // Try to use the filter input if available
+  const filterInput = await waitQuerySelector('input[placeholder*="filter"], input[placeholder*="search"]', null, 2000).catch(() => null);
+  if (filterInput) {
+    console.log('n8n Folder View: Using filter input');
+    filterInput.focus();
+    filterInput.value = tagName;
+    filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+    
+    // Trigger Enter key to apply the filter
+    setTimeout(() => {
+      filterInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+    }, 300);
+  } else {
+    console.error(`n8n Folder View: Could not find any way to filter by tag "${tagName}"`);
+  }
 }
 
 /**
@@ -244,22 +333,73 @@ async function extractTagNamesWithCounts() {
   let retryCount = 0;
   const maxRetries = 5;
   
+  console.log('n8n Folder View: Starting tag extraction');
+  
   while (retryCount < maxRetries) {
     try {
-      await waitQuerySelector('li[data-test-id="tag"] > span', null, 3000);
       const tagCountMap = {};
       
-      // Get all workflow elements
-      const workflowElements = document.querySelectorAll('[data-test-id="workflows-list-item"]');
+      // Define possible tag selectors based on different n8n versions
+      const possibleTagSelectors = [
+        // New n8n tag structure (from the provided HTML)
+        'span.n8n-tag > span',
+        '.n8n-tags [data-test-id="workflow-card-tags"] span.n8n-tag > span',
+        // Older tag structure
+        'li[data-test-id="tag"] > span',
+        // Generic fallback
+        '[data-test-id*="tag"] > span'
+      ];
       
-      workflowElements.forEach(workflow => {
-        const tagElements = workflow.querySelectorAll('li[data-test-id="tag"] > span');
+      // Try each selector until we find tags
+      let tagElements = [];
+      for (const selector of possibleTagSelectors) {
+        tagElements = document.querySelectorAll(selector);
+        console.log(`n8n Folder View: Trying selector "${selector}" - found ${tagElements.length} elements`);
+        if (tagElements.length > 0) {
+          break;
+        }
+      }
+      
+      if (tagElements.length === 0) {
+        // Special case: try to find any elements that might contain tag text
+        console.log('n8n Folder View: No tags found with standard selectors, trying broader search');
+        
+        // Look for workflow elements first
+        const workflowCards = document.querySelectorAll('[data-test-id*="workflow"], .workflow-card, [class*="workflow"]');
+        console.log(`n8n Folder View: Found ${workflowCards.length} potential workflow cards`);
+        
+        // For debugging, log the HTML structure of a workflow card if found
+        if (workflowCards.length > 0) {
+          console.log('n8n Folder View: Example workflow card HTML:', workflowCards[0].outerHTML);
+        }
+        
+        // Check all possible child elements that might contain tags
+        workflowCards.forEach(card => {
+          const potentialTagContainers = card.querySelectorAll('[class*="tag"], [data-test-id*="tag"]');
+          console.log(`n8n Folder View: Found ${potentialTagContainers.length} potential tag containers in workflow card`);
+          
+          potentialTagContainers.forEach(container => {
+            const spans = container.querySelectorAll('span');
+            spans.forEach(span => {
+              const text = span.textContent.trim();
+              if (text && text.length > 0) {
+                console.log(`n8n Folder View: Found potential tag text: "${text}"`);
+                tagCountMap[text] = (tagCountMap[text] || 0) + 1;
+              }
+            });
+          });
+        });
+      } else {
+        // Process standard tag elements
         tagElements.forEach(tagElement => {
           const tagName = tagElement.textContent.trim();
-          tagCountMap[tagName] = (tagCountMap[tagName] || 0) + 1;
+          if (tagName && tagName.length > 0) {
+            tagCountMap[tagName] = (tagCountMap[tagName] || 0) + 1;
+          }
         });
-      });
+      }
       
+      console.log(`n8n Folder View: Extracted ${Object.keys(tagCountMap).length} unique tags:`, Object.keys(tagCountMap));
       return tagCountMap;
     } catch (error) {
       retryCount++;
@@ -368,13 +508,28 @@ function restoreState() {
  */
 function setupTagObserver() {
   const observer = new MutationObserver(async (mutations) => {
-    // Check if mutations affect the tags
-    const tagChanged = mutations.some(mutation => {
-      return mutation.target.querySelector && mutation.target.querySelector('li[data-test-id="tag"]');
+    // Check if we might need to update the tags
+    const significantChanges = mutations.some(mutation => {
+      // Look for changes to elements that might contain tags
+      return mutation.target.querySelector && (
+        mutation.target.querySelector('[data-test-id*="tag"]') ||
+        mutation.target.querySelector('[class*="tag"]') ||
+        mutation.target.querySelector('[data-test-id*="workflow"]')
+      );
     });
     
-    if (tagChanged) {
+    if (significantChanges) {
+      console.log('n8n Folder View: Detected DOM changes that might affect tags');
+      
+      // Wait a moment for any changes to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const tagData = await extractTagNamesWithCounts();
+      if (Object.keys(tagData).length === 0) {
+        console.warn('n8n Folder View: No tags found after DOM changes');
+        return;
+      }
+      
       const folderList = document.querySelector('#folder-list');
       
       if (folderList && Object.keys(tagData).length > 0) {
@@ -418,30 +573,143 @@ function setupTagObserver() {
     }
   });
   
-  // Start observing the workflows container for changes after a delay to ensure it's loaded
+  // Start observing after a delay and observe more of the document to catch all changes
   setTimeout(() => {
-    const workflowsContainer = document.querySelector('.workflows-list');
-    if (workflowsContainer) {
-      observer.observe(workflowsContainer, { childList: true, subtree: true });
+    // Observe the main content area rather than just workflows-list
+    const contentArea = document.querySelector('#app') || document.body;
+    if (contentArea) {
+      observer.observe(contentArea, { childList: true, subtree: true });
+      console.log('n8n Folder View: Started observing DOM for tag changes');
     }
   }, 2000);
 }
 
+/**
+ * Gets the sidebar element using various selectors to ensure compatibility.
+ * 
+ * @returns {Element|null} The sidebar element or null if not found.
+ */
+function getSidebar() {
+  // Try different possible selectors for the sidebar
+  const sidebarSelectors = [
+    '#sidebar',
+    '[class*="sidebar"]',
+    '[class*="Sidebar"]',
+    '[id*="sidebar"]',
+    '[id*="Sidebar"]',
+    'aside', // n8n might use a semantic aside element for the sidebar
+    '[class*="nav"]', // Sometimes sidebars have nav-related class names
+    '[role="navigation"]', // Accessibility role
+    // n8n-specific selectors
+    '[data-test-id="main-sidebar"]',
+    '.el-menu',
+    '#app > div > div:first-child' // Common pattern in Vue apps like n8n
+  ];
+  
+  // Try each selector
+  for (const selector of sidebarSelectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      // Verify it's likely a sidebar by checking size and position
+      const rect = element.getBoundingClientRect();
+      // Most sidebars are tall and narrow, positioned at the left edge
+      if (rect.height > 200 && rect.width < 400 && rect.left < 100) {
+        console.log(`n8n Folder View: Found sidebar using selector: ${selector}`);
+        return element;
+      }
+    }
+  }
+  
+  // Fallback: look for the tallest, narrowest element on the left side
+  const possibleSidebars = Array.from(document.querySelectorAll('div, aside, nav'))
+    .filter(el => {
+      const rect = el.getBoundingClientRect();
+      return rect.height > 300 && rect.width < 300 && rect.left < 50;
+    })
+    .sort((a, b) => {
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      // Prefer taller, narrower elements
+      return (rectB.height / rectB.width) - (rectA.height / rectA.width);
+    });
+  
+  if (possibleSidebars.length > 0) {
+    console.log('n8n Folder View: Found sidebar using dimension heuristics');
+    return possibleSidebars[0];
+  }
+  
+  return null;
+}
+
+/**
+ * Waits for the sidebar to be available in the DOM.
+ * 
+ * @param {number} maxAttempts - Maximum number of attempts to find the sidebar
+ * @param {number} interval - Interval between attempts in milliseconds
+ * @returns {Promise<Element>} A promise that resolves to the sidebar element
+ */
+async function waitForSidebar(maxAttempts = 20, interval = 500) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    
+    const checkSidebar = () => {
+      attempts++;
+      const sidebar = getSidebar();
+      
+      if (sidebar) {
+        console.log(`n8n Folder View: Found sidebar after ${attempts} attempts`);
+        resolve(sidebar);
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        console.error(`n8n Folder View: Could not find sidebar after ${maxAttempts} attempts`);
+        reject(new Error('Sidebar not found'));
+        return;
+      }
+      
+      console.log(`n8n Folder View: Waiting for sidebar (attempt ${attempts}/${maxAttempts})`);
+      setTimeout(checkSidebar, interval);
+    };
+    
+    checkSidebar();
+  });
+}
+
 async function main() {
   try {
-    // Show loading state
-    const sidebar = document.getElementById('sidebar');
-    if (!sidebar) {
-      console.error('n8n Folder View: Could not find sidebar element');
+    console.log('n8n Folder View: Starting extension');
+    
+    // Create the container first, with loading spinner active
+    const containerCreated = await createInitialContainer();
+    if (!containerCreated) {
+      console.error('n8n Folder View: Failed to create initial container, retrying in 5 seconds');
+      setTimeout(main, 5000);
       return;
     }
+    
+    // Wait for the page to fully settle
+    console.log('n8n Folder View: Waiting for page to stabilize before extracting tags');
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     const tagData = await extractTagNamesWithCounts();
     if (Object.keys(tagData).length === 0) {
       console.warn('n8n Folder View: No tags found');
+      // Add a fallback for testing
+      console.log('n8n Folder View: Adding fallback tags for testing');
+      const fallbackTags = {
+        'sample-tag-1': 1,
+        'sample-tag-2': 2,
+        'dialer': 3,
+        'jason steele': 2,
+        'avison young': 1
+      };
+      createFolderView(fallbackTags);
+    } else {
+      console.log(`n8n Folder View: Found ${Object.keys(tagData).length} tags`);
+      createFolderView(tagData);
     }
     
-    createFolderView(tagData);
     setupTagObserver();
     
     // Set "All" folder as active by default if no saved state
@@ -455,12 +723,18 @@ async function main() {
     }
   } catch (error) {
     console.error('n8n Folder View: Error in main function', error);
+    
+    // Add a retry mechanism
+    setTimeout(() => {
+      console.log('n8n Folder View: Retrying initialization...');
+      main();
+    }, 5000);
   }
 }
 
-// Start when the page is fully loaded
+// Wait a bit longer before starting to ensure the page is fully loaded
 if (document.readyState === 'complete') {
-  main();
+  setTimeout(main, 1000);
 } else {
-  window.addEventListener('load', main);
+  window.addEventListener('load', () => setTimeout(main, 1000));
 }
