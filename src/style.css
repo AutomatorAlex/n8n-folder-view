@@ -7,6 +7,48 @@
   overflow: hidden; /* Prevents content from overflowing */
 }
 
+#folder-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  margin-top: 10px;
+}
+
+#folder-view-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+#folder-sort-options {
+  margin-left: auto;
+}
+
+#folder-sort-select {
+  background-color: #333;
+  color: #C3C9D5;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #C3C9D5;
+  animation: spin 1s linear infinite;
+  margin-left: 8px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 .divider {
   border-top: 1px #9398A0 solid;
   margin: 12px;
@@ -18,13 +60,13 @@
   flex-direction: column;
   position: relative;
   flex-grow: 1; /* Allows it to expand within the available space */
-  max-height: calc(100% - 24px); /* Adjust max-height dynamically */
+  max-height: calc(100% - 60px); /* Adjust max-height dynamically */
   overflow-y: auto; /* Enables scrolling */
 }
 
 .folder-list-item {
   cursor: pointer;
-  padding: 20px 12px;
+  padding: 10px 12px;
   height: 40px;
   border-radius: 4px;
   align-items: center;
@@ -49,7 +91,17 @@
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  max-width: calc(100% - 30px);
+  max-width: calc(100% - 60px);
+}
+
+.folder-list-item-count {
+  margin-left: auto;
+  background-color: rgba(255, 255, 255, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  min-width: 24px;
+  text-align: center;
 }
 
 .tooltip {
