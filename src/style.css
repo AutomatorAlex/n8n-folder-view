@@ -2,11 +2,32 @@
   color: #C3C9D5;
   display: flex;
   flex-direction: column;
-  position: relative;
-  max-height: 100%; /* Prevent it from growing beyond the parent */
-  overflow: hidden; /* Prevents content from overflowing */
-  min-width: 240px; /* Increase minimum width for better readability */
-  width: 100%; /* Use full width of the sidebar */
+  position: relative; /* Changed from absolute positioning */
+  max-height: calc(100vh - 200px);
+  overflow: hidden;
+  min-width: 240px;
+  width: 100%;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+  background-color: inherit; /* Match sidebar background */
+  z-index: 1; /* Lower z-index to ensure proper integration */
+}
+
+/* Make sure our container is fully visible */
+#side-menu #folder-view-container,
+.side-menu #folder-view-container, 
+[class*="_sideMenu_"] #folder-view-container,
+[class*="_menuContent_"] #folder-view-container {
+  padding-top: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Ensure our folder view is at the top of the sidebar */
+#sidebar > #folder-view-container, 
+aside > #folder-view-container {
+  order: -1;
+  margin-top: 0;
 }
 
 /* Force sidebar to be wider */
@@ -21,9 +42,58 @@ aside[class*="sidebar"],
 .menu-container,
 #side-menu,
 .side-menu,
-[class*="_menuContent_"] {
+[class*="_menuContent_"],
+[class*="_sideMenu_"] {
   min-width: 260px !important;
   width: 260px !important;
+}
+
+/* Fix for when our container is next to the original sidebar elements */
+#folder-view-container + #side-menu,
+#folder-view-container + .side-menu,
+#folder-view-container + [class*="_sideMenu_"],
+#folder-view-container + [class*="_menuContent_"] {
+  margin-top: 10px;
+}
+
+/* Ensure folder list is scrollable */
+#folder-list {
+  padding: 4px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  flex-grow: 1; /* Allows it to expand within the available space */
+  max-height: calc(100vh - 300px); /* More conservative height */
+  overflow-y: auto; /* Enables scrolling */
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* Fix for tooltips being hidden */
+.tooltip {
+  z-index: 9999999 !important;
+}
+
+/* Ensure folder items are clickable */
+.folder-list-item {
+  cursor: pointer;
+  padding: 10px 12px;
+  height: 40px;
+  border-radius: 4px;
+  align-items: center;
+  display: flex;
+  position: relative;
+  z-index: 1; /* Lower z-index to ensure better integration */
+  transition: background-color 0.2s;
+  width: 100%;
+  user-select: none; /* Prevent text selection on clicks */
+  box-sizing: border-box;
+}
+
+/* Ensure active state is very visible */
+.folder-list-item.is-active {
+  background-color: #525456 !important;
+  font-weight: bold !important;
 }
 
 #folder-view-header {
@@ -71,30 +141,6 @@ aside[class*="sidebar"],
 .divider {
   border-top: 1px #9398A0 solid;
   margin: 12px;
-}
-
-#folder-list {
-  padding: 0 12px;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  flex-grow: 1; /* Allows it to expand within the available space */
-  max-height: calc(100% - 60px); /* Adjust max-height dynamically */
-  overflow-y: auto; /* Enables scrolling */
-  width: 100%;
-}
-
-.folder-list-item {
-  cursor: pointer;
-  padding: 10px 12px;
-  height: 40px;
-  border-radius: 4px;
-  align-items: center;
-  display: flex;
-  position: relative;
-  z-index: 1; /* Ensure clickability */
-  transition: background-color 0.2s;
-  width: 100%;
 }
 
 .folder-list-item:not(:first-child) {
@@ -196,7 +242,7 @@ aside[class*="sidebar"],
   border-radius: 4px;
   font-size: 12px;
   white-space: nowrap;
-  z-index: 9999999;
+  z-index: 9999999 !important;
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.3);
   opacity: 0;
   pointer-events: none;
@@ -232,12 +278,12 @@ aside[class*="sidebar"],
 
 .folder-list-item:hover,
 .folder-list-item.is-active {
-  background-color: #525456;
+  background-color: #525456 !important;
 }
 
 /* Ensure folder items are clickable when active */
 .folder-list-item.is-active {
-  background-color: #525456;
+  background-color: #525456 !important;
   position: relative;
   z-index: 1;
 }
@@ -262,4 +308,391 @@ aside[class*="sidebar"],
 
 #folder-list::-webkit-scrollbar-thumb:hover {
   background: #555 !important;
+}
+
+/* Target specific n8n sidebar structures */
+#sidebar > #folder-view-container,
+.side-menu > #folder-view-container,
+[class*="_container_"] > #folder-view-container,
+[class*="_menuContent_"] > #folder-view-container,
+[class*="_sideMenu_"] > #folder-view-container,
+.menu-container > #folder-view-container,
+.el-menu > #folder-view-container {
+  padding: 10px 0;
+  margin-top: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Reset some potential problematic properties */
+#folder-view-container {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  float: none !important;
+  clear: both !important;
+}
+
+/* Force containment within sidebar */
+aside[role="navigation"] #folder-view-container,
+aside[class*="sidebar"] #folder-view-container,
+#sidebar #folder-view-container {
+  position: relative !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* Ensure the folder view has similar styling to other sidebar elements */
+#folder-view-container h3 {
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  color: inherit;
+  margin: 0;
+}
+
+/* Custom Sidebar - Modern Clean Design */
+#n8n-custom-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 100vh;
+  background: linear-gradient(180deg, #272727 0%, #1c1c1c 100%);
+  color: #e9e9e9;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+/* Sidebar Header */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 16px;
+  color: #FF6D5A;
+}
+
+.sidebar-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.sidebar-header h2 span {
+  font-weight: 300;
+  opacity: 0.7;
+  font-size: 16px;
+}
+
+/* Search Bar */
+.sidebar-search {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.search-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 0 12px;
+  transition: all 0.2s ease;
+}
+
+.search-container:focus-within {
+  background-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.search-icon {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 8px;
+}
+
+#folder-search {
+  background: transparent;
+  border: none;
+  color: #e9e9e9;
+  padding: 10px 0;
+  width: 100%;
+  font-size: 14px;
+  outline: none;
+}
+
+#folder-search::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.clear-search {
+  cursor: pointer;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.5);
+  display: none;
+}
+
+.clear-search:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Sidebar Sections */
+.sidebar-section {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px 8px;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+}
+
+#folder-sort-select {
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  padding: 4px;
+  border-radius: 4px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.6)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0px center;
+  padding-right: 16px;
+}
+
+#folder-sort-select:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+#folder-sort-select option {
+  background-color: #272727;
+}
+
+/* Folder List */
+#folder-list {
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+.folder-list-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 0; /* Remove bottom margin since we're using dividers */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  position: relative; /* For divider positioning */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05); /* Add divider */
+  padding-bottom: 10px; /* Add padding to account for divider */
+  margin-top: 4px; /* Add a small top margin */
+}
+
+/* Remove border from last item */
+.folder-list-item:last-child {
+  border-bottom: none;
+}
+
+/* Special styling for the "All" folder */
+.folder-list-item[data-tag="All"] {
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Make the All divider more prominent */
+  padding-bottom: 14px; /* More padding for All folder */
+}
+
+/* Enhance hover state with divider visibility */
+.folder-list-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: rgba(255, 255, 255, 0.1); /* Make divider more visible on hover */
+}
+
+/* Make active item's divider more prominent */
+.folder-list-item.is-active {
+  background-color: rgba(255, 255, 255, 0.1);
+  font-weight: 500;
+  border-bottom-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Logo container styling */
+.logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 16px;
+}
+
+.logo-container img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+/* No results */
+.no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 0;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+}
+
+.no-results i {
+  font-size: 36px;
+  margin-bottom: 16px;
+}
+
+.no-results p {
+  font-size: 14px;
+  margin: 0;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  border-top-color: rgba(255, 255, 255, 0.7);
+  animation: spin 0.8s linear infinite;
+  margin: 20px auto;
+  display: none;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Sidebar Footer */
+.sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  margin-bottom: 10px;
+}
+
+.action-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.action-button i {
+  margin-right: 8px;
+  font-size: 16px;
+}
+
+.sidebar-info {
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  padding-top: 8px;
+}
+
+/* Tooltips */
+.tooltip {
+  position: fixed;
+  background-color: #2c2c2c;
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 9999;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  transform: translateY(-50%);
+  visibility: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tooltip::after {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-style: solid;
+  border-width: 5px 5px 5px 0;
+  border-color: transparent #2c2c2c transparent transparent;
+}
+
+.folder-list-item:hover .tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Scrollbars */
+#folder-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+#folder-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+#folder-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+#folder-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Adjust main content */
+body #app > div > div:nth-child(2) {
+  transition: margin-left 0.3s ease;
 }

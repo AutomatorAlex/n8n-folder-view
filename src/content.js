@@ -2,35 +2,58 @@ const TEMPLATES = {
   folderItem: (tagname, count = 0) => `
     <div class="folder-list-item" data-tag="${tagname}">
       <span class="folder-list-item-icon">
-        <i class="el-icon-folder"></i>
+        <i class="mdi mdi-folder-outline"></i>
       </span>
       <span class="folder-list-item-name">${tagname}</span>
       <span class="folder-list-item-count">${count}</span>
-      ${tagname !== 'All' ? '<button class="folder-remove-btn" title="Remove folder"><i class="el-icon-delete"></i></button>' : ''}
+      ${tagname !== 'All' ? '<button class="folder-remove-btn" title="Remove folder"><i class="mdi mdi-close"></i></button>' : ''}
       <div class="tooltip">${tagname} (${count} workflows)</div>
     </div>
   `,
   
-  folderViewContainer: `
-    <div id="folder-view-container">
-      <div id="folder-view-header">
-        <h3>Folders</h3>
-        <div id="folder-sort-options">
-          <select id="folder-sort-select">
-            <option value="name-asc">Name A-Z</option>
-            <option value="name-desc">Name Z-A</option>
-            <option value="count-desc">Count (High-Low)</option>
-            <option value="count-asc">Count (Low-High)</option>
-          </select>
+  customSidebar: `
+    <div id="n8n-custom-sidebar">
+      <div class="sidebar-header">
+        <div class="logo-container">
+          <!-- Updated logo size: doubled from 32x32 to 64x64 -->
+          <img src="https://raw.githubusercontent.com/n8n-io/n8n/master/assets/n8n-logo.png" alt="n8n Logo" width="64" height="64" />
+        </div>
+        <h2>n8n <span>Folders</span></h2>
+      </div>
+      
+      <div class="sidebar-search">
+        <div class="search-container">
+          <i class="mdi mdi-magnify search-icon"></i>
+          <input type="text" id="folder-search" placeholder="Search folders...">
+          <i class="mdi mdi-close clear-search" id="clear-search"></i>
+        </div>
+      </div>
+      
+      <div class="sidebar-section folders-section">
+        <div class="section-header">
+          <h3>Folders</h3>
+          <div class="section-actions">
+            <select id="folder-sort-select" title="Sort folders">
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+              <option value="count-desc">Count (High-Low)</option>
+              <option value="count-asc">Count (Low-High)</option>
+            </select>
+          </div>
         </div>
         <div id="folder-loading" class="loading-spinner"></div>
+        <div id="folder-list">
+          <!-- Folders will be inserted here -->
+        </div>
       </div>
-      <hr class="divider"/>
-      <div id="folder-list">
-      </div>
-      <hr class="divider"/>
-      <div id="folder-actions">
-        <button id="folder-cleanup-btn" title="Remove unused folders">Clean Up</button>
+      
+      <div class="sidebar-footer">
+        <button id="folder-cleanup-btn" class="action-button">
+          <i class="mdi mdi-broom"></i>Clean Up Unused Folders
+        </button>
+        <div class="sidebar-info">
+          <span>n8n Folder View</span>
+        </div>
       </div>
     </div>
   `
@@ -41,8 +64,10 @@ const state = {
   tags: {},
   selectedTag: null,
   sortOrder: 'name-asc',
-  allTags: {}, // New property to store all tags ever seen
-  lastSyncTime: 0 // Track when we last synced with actual tags
+  allTags: {}, 
+  lastSyncTime: 0,
+  sidebarInitialized: false,
+  searchFilter: ''
 };
 
 /**
@@ -171,11 +196,128 @@ function showInitialLoadingIndicator() {
 // Run this immediately
 showInitialLoadingIndicator();
 
+// Cache for sidebar element to prevent repeated queries
+let sidebarCache = null;
+let sidebarLastQueried = 0;
+const SIDEBAR_CACHE_TTL = 2000; // 2 seconds
+
 /**
- * Creates the initial folder view container with loading spinner.
+ * Gets the sidebar element using various selectors to ensure compatibility.
+ * Uses caching to prevent excessive DOM queries.
+ * 
+ * @returns {Element|null} The sidebar element or null if not found.
+ */
+function getSidebar() {
+  // Check if we have a cached sidebar that's still valid
+  const now = Date.now();
+  if (sidebarCache && (now - sidebarLastQueried < SIDEBAR_CACHE_TTL)) {
+    return sidebarCache;
+  }
+  
+  // Update the last query time
+  sidebarLastQueried = now;
+  
+  // Try different possible selectors for the sidebar
+  const sidebarSelectors = [
+    '#sidebar',
+    '[class*="sidebar"]',
+    '[class*="Sidebar"]',
+    '[id*="sidebar"]',
+    '[id*="Sidebar"]',
+    'aside', // n8n might use a semantic aside element for the sidebar
+    '[class*="nav"]', // Sometimes sidebars have nav-related class names
+    '[role="navigation"]', // Accessibility role
+    // n8n-specific selectors
+    '[data-test-id="main-sidebar"]',
+    '.el-menu',
+    '#app > div > div:first-child' // Common pattern in Vue apps like n8n
+  ];
+  
+  // Try each selector
+  for (const selector of sidebarSelectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      // Verify it's likely a sidebar by checking size and position
+      const rect = element.getBoundingClientRect();
+      // Most sidebars are tall and narrow, positioned at the left edge
+      if (rect.height > 200 && rect.width < 400 && rect.left < 100) {
+        // Only log if we're finding it the first time or it changed
+        if (!sidebarCache || sidebarCache !== element) {
+          console.log(`n8n Folder View: Found sidebar using selector: ${selector}`);
+        }
+        sidebarCache = element;
+        return element;
+      }
+    }
+  }
+  
+  // Fallback: look for the tallest, narrowest element on the left side
+  const possibleSidebars = Array.from(document.querySelectorAll('div, aside, nav'))
+    .filter(el => {
+      const rect = el.getBoundingClientRect();
+      return rect.height > 300 && rect.width < 300 && rect.left < 50;
+    })
+    .sort((a, b) => {
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      // Prefer taller, narrower elements
+      return (rectB.height / rectB.width) - (rectA.height / rectA.width);
+    });
+  
+  if (possibleSidebars.length > 0) {
+    // Only log if we're finding it the first time or it changed
+    if (!sidebarCache || sidebarCache !== possibleSidebars[0]) {
+      console.log('n8n Folder View: Found sidebar using dimension heuristics');
+    }
+    sidebarCache = possibleSidebars[0];
+    return possibleSidebars[0];
+  }
+  
+  // No sidebar found
+  sidebarCache = null;
+  return null;
+}
+
+/**
+ * Waits for the sidebar to be available in the DOM.
+ * 
+ * @param {number} maxAttempts - Maximum number of attempts to find the sidebar
+ * @param {number} interval - Interval between attempts in milliseconds
+ * @returns {Promise<Element>} A promise that resolves to the sidebar element
+ */
+async function waitForSidebar(maxAttempts = 20, interval = 500) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    
+    const checkSidebar = () => {
+      attempts++;
+      const sidebar = getSidebar();
+      
+      if (sidebar) {
+        console.log(`n8n Folder View: Found sidebar after ${attempts} attempts`);
+        resolve(sidebar);
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        console.error(`n8n Folder View: Could not find sidebar after ${maxAttempts} attempts`);
+        reject(new Error('Sidebar not found'));
+        return;
+      }
+      
+      console.log(`n8n Folder View: Waiting for sidebar (attempt ${attempts}/${maxAttempts})`);
+      setTimeout(checkSidebar, interval);
+    };
+    
+    checkSidebar();
+  });
+}
+
+/**
+ * Creates the custom sidebar container that will replace the original n8n sidebar.
  * @returns {Promise<boolean>} Whether the container was successfully created
  */
-async function createInitialContainer() {
+async function createCustomSidebar() {
   try {
     // Remove any temporary loading indicator
     const tempLoader = document.getElementById('n8n-folder-view-loading');
@@ -183,47 +325,78 @@ async function createInitialContainer() {
       tempLoader.remove();
     }
     
-    // Wait for the sidebar to be available
-    const sidebar = await waitForSidebar();
-    
-    // Check if the sidebar is narrow and apply width fix
-    const sidebarRect = sidebar.getBoundingClientRect();
-    if (sidebarRect.width < 250) {
-      sidebar.style.minWidth = '260px';
-      sidebar.style.width = '260px';
-      console.log('n8n Folder View: Applied sidebar width fix');
+    // Wait for the original sidebar to be available
+    const originalSidebar = await waitForSidebar();
+    if (!originalSidebar) {
+      console.error('n8n Folder View: Could not find original sidebar');
+      return false;
     }
     
-    // Find the element to insert our folder view
-    // Try multiple selectors to find the right place
-    const possibleContainers = [
-      '#sidebar [class^="_menuContent_"]',
-      '.el-menu',
-      '[role="navigation"] > div',
-      '#sidebar > div',
-      'aside > div'
-    ];
+    // Check if we've already initialized the sidebar
+    if (state.sidebarInitialized) {
+      console.log('n8n Folder View: Sidebar already initialized');
+      return true;
+    }
     
-    let menuContent = null;
-    for (const selector of possibleContainers) {
-      menuContent = document.querySelector(selector);
-      if (menuContent) {
-        console.log(`n8n Folder View: Found menu container using selector: ${selector}`);
-        break;
+    // Get original sidebar dimensions
+    const sidebarRect = originalSidebar.getBoundingClientRect();
+    const originalWidth = sidebarRect.width;
+    const originalHeight = sidebarRect.height;
+    
+    // Create our custom sidebar
+    document.body.insertAdjacentHTML('afterbegin', TEMPLATES.customSidebar);
+    
+    // Get reference to our new sidebar
+    const customSidebar = document.getElementById('n8n-custom-sidebar');
+    if (!customSidebar) {
+      console.error('n8n Folder View: Failed to insert custom sidebar');
+      return false;
+    }
+    
+    // Position and size the custom sidebar to match original
+    customSidebar.style.width = Math.max(260, originalWidth) + 'px';
+    customSidebar.style.height = '100vh';
+    
+    // Hide the original sidebar
+    originalSidebar.style.display = 'none';
+    
+    // Add Material Design Icons if not already added
+    if (!document.getElementById('mdi-font')) {
+      const mdiFontLink = document.createElement('link');
+      mdiFontLink.id = 'mdi-font';
+      mdiFontLink.rel = 'stylesheet';
+      mdiFontLink.href = 'https://cdn.jsdelivr.net/npm/@mdi/font@6.9.96/css/materialdesignicons.min.css';
+      document.head.appendChild(mdiFontLink);
+    }
+    
+    // Add search functionality
+    const searchInput = document.getElementById('folder-search');
+    const clearButton = document.getElementById('clear-search');
+    
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        state.searchFilter = e.target.value.toLowerCase().trim();
+        filterFolderList();
+      });
+      
+      // Clear search when X is clicked
+      if (clearButton) {
+        clearButton.addEventListener('click', () => {
+          searchInput.value = '';
+          state.searchFilter = '';
+          filterFolderList();
+          clearButton.style.display = 'none';
+        });
+        
+        // Show/hide clear button
+        searchInput.addEventListener('input', () => {
+          clearButton.style.display = searchInput.value ? 'block' : 'none';
+        });
       }
     }
     
-    if (!menuContent) {
-      // Fallback: insert after the sidebar element itself
-      menuContent = sidebar;
-      if (!menuContent) {
-        console.error('n8n Folder View: Could not find a suitable container for folder view');
-        return false;
-      }
-    }
-    
-    // Create the container with just the loading spinner active
-    menuContent.insertAdjacentHTML('beforebegin', TEMPLATES.folderViewContainer);
+    // Set sidebar as initialized
+    state.sidebarInitialized = true;
     
     // Make sure the loading spinner is visible
     const loadingSpinner = document.querySelector('#folder-loading');
@@ -231,7 +404,6 @@ async function createInitialContainer() {
       loadingSpinner.style.display = 'block';
       
       // Safety timeout - hide spinner after 10 seconds no matter what
-      // This prevents indefinite spinner if something goes wrong
       setTimeout(() => {
         if (loadingSpinner && loadingSpinner.style.display !== 'none') {
           console.log('n8n Folder View: Force hiding spinner after timeout');
@@ -240,10 +412,49 @@ async function createInitialContainer() {
       }, 10000);
     }
     
+    console.log('n8n Folder View: Custom sidebar successfully created');
     return true;
   } catch (error) {
-    console.error('n8n Folder View: Error creating initial container', error);
+    console.error('n8n Folder View: Error creating custom sidebar', error);
     return false;
+  }
+}
+
+/**
+ * Filters the folder list based on the search input
+ */
+function filterFolderList() {
+  const folderItems = document.querySelectorAll('.folder-list-item');
+  const searchFilter = state.searchFilter.toLowerCase();
+  
+  folderItems.forEach(item => {
+    const tagName = item.dataset.tag.toLowerCase();
+    if (tagName === 'all' || tagName.includes(searchFilter)) {
+      item.style.display = '';
+    } else {
+      item.style.display = 'none';
+    }
+  });
+  
+  // Show no results message if needed
+  const folderList = document.getElementById('folder-list');
+  const noResults = document.getElementById('no-folder-results');
+  
+  if (folderList) {
+    const visibleFolders = Array.from(folderItems).filter(item => item.style.display !== 'none');
+    
+    if (visibleFolders.length === 0 && searchFilter) {
+      if (!noResults) {
+        folderList.insertAdjacentHTML('beforeend', `
+          <div id="no-folder-results" class="no-results">
+            <i class="mdi mdi-folder-search-outline"></i>
+            <p>No folders matching "${state.searchFilter}"</p>
+          </div>
+        `);
+      }
+    } else if (noResults) {
+      noResults.remove();
+    }
   }
 }
 
@@ -257,8 +468,14 @@ function createFolderView(tagData) {
     // Save to state
     state.tags = tagData;
     
+    const folderList = document.querySelector('#folder-list');
+    if (!folderList) return;
+    
+    // Clear the folder list first
+    folderList.innerHTML = '';
+    
     const addFolderListItem = (tagname, count = 0) => {
-      document.querySelector('#folder-list').insertAdjacentHTML('beforeend', TEMPLATES.folderItem(tagname, count));
+      folderList.insertAdjacentHTML('beforeend', TEMPLATES.folderItem(tagname, count));
     }
 
     const handleFolderListItemClick = (event) => {
@@ -350,7 +567,6 @@ function createFolderView(tagData) {
     });
 
     // Still add the list-level click handler as a backup
-    const folderList = document.querySelector('#folder-list');
     if (folderList) {
       folderList.addEventListener('click', handleFolderListItemClick);
       
@@ -369,6 +585,11 @@ function createFolderView(tagData) {
     if (sortSelect) {
       sortSelect.value = state.sortOrder;
       sortSelect.addEventListener('change', handleSortChange);
+    }
+
+    // Apply any active search filter
+    if (state.searchFilter) {
+      filterFolderList();
     }
 
     // Explicitly hide loading spinner at the end of folder view creation
@@ -411,9 +632,33 @@ async function applyActive(folderItem) {
  * @param {string} tagName - The name of the tag to filter workflows by.
  */
 async function filterWorkflowsByTag(tagName) {
+  // Only apply filtering if we're on the workflow home page (/home/workflows)
+  if (!window.location.pathname.startsWith('/home/workflows')) {
+    console.log('n8n Folder View: Not on workflows page, ignoring folder filter.');
+    return;
+  }
   // Store the currently selected tag before filtering
   state.selectedTag = tagName;
   saveState();
+  
+  // First, try to clear any existing filters
+  try {
+    const removeFiltersButton = await waitQuerySelector(
+      'a[data-test-id="workflows-filter-reset"]', 
+      null, 
+      1000
+    ).catch(() => null);
+    
+    if (removeFiltersButton) {
+      console.log('n8n Folder View: Clearing existing filters before applying new one');
+      removeFiltersButton.click();
+      
+      // Wait a moment for the UI to catch up
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  } catch (err) {
+    console.log('n8n Folder View: Could not clear filters, continuing anyway');
+  }
   
   // Handle "All" folder to show all workflows
   if (tagName === 'All') {
@@ -427,65 +672,50 @@ async function filterWorkflowsByTag(tagName) {
     return;
   }
   
-  // Define possible selectors for tag elements that can be clicked
-  const possibleTagSelectors = [
-    // New n8n structure
-    `span.n8n-tag:has(> span:contains("${tagName}"))`,
-    // Older structure
-    `li[data-test-id="tag"]:has(> span:contains("${tagName}"))`,
-    // XPath alternatives will be used for complex cases
-  ];
-  
   console.log(`n8n Folder View: Trying to filter by tag "${tagName}"`);
   
-  // Try each CSS selector first
-  for (const selector of possibleTagSelectors) {
-    try {
-      const tagElement = document.querySelector(selector);
-      if (tagElement) {
-        console.log(`n8n Folder View: Found tag element using selector: ${selector}`);
-        tagElement.click();
-        return;
-      }
-    } catch (error) {
-      console.warn(`n8n Folder View: Selector error: ${error.message}`);
-      // Continue to next selector
-    }
-  }
-  
-  // If CSS selectors didn't work, try XPath as it can handle contains() more reliably
+  // Skip the problematic selectors and go straight to XPath which works
   const tagXPaths = [
     `//span[contains(@class, "n8n-tag")][.//span[contains(text(), "${tagName}")]]`,
     `//li[@data-test-id="tag"][.//span[contains(text(), "${tagName}")]]`,
     `//span[contains(text(), "${tagName}")]`
   ];
   
+  let tagFound = false;
+  
   for (const xpath of tagXPaths) {
-    const tagElement = queryXpath(xpath);
-    if (tagElement) {
-      console.log(`n8n Folder View: Found tag element using XPath: ${xpath}`);
-      tagElement.click();
-      return;
+    try {
+      const tagElement = queryXpath(xpath);
+      if (tagElement) {
+        console.log(`n8n Folder View: Found tag element using XPath: ${xpath}`);
+        tagElement.click();
+        tagFound = true;
+        return;
+      }
+    } catch (err) {
+      console.warn(`n8n Folder View: XPath error: ${err.message}`);
     }
   }
   
   // If we can't find the tag directly, try another approach
-  console.warn(`n8n Folder View: Could not find tag element for "${tagName}", trying to use filters`);
-  
-  // Try to use the filter input if available
-  const filterInput = await waitQuerySelector('input[placeholder*="filter"], input[placeholder*="search"]', null, 2000).catch(() => null);
-  if (filterInput) {
-    console.log('n8n Folder View: Using filter input');
-    filterInput.focus();
-    filterInput.value = tagName;
-    filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+  if (!tagFound) {
+    console.warn(`n8n Folder View: Could not find tag element for "${tagName}", trying to use filters`);
     
-    // Trigger Enter key to apply the filter
-    setTimeout(() => {
-      filterInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-    }, 300);
-  } else {
-    console.error(`n8n Folder View: Could not find any way to filter by tag "${tagName}"`);
+    // Try to use the filter input if available
+    const filterInput = await waitQuerySelector('input[placeholder*="filter"], input[placeholder*="search"]', null, 2000).catch(() => null);
+    if (filterInput) {
+      console.log('n8n Folder View: Using filter input');
+      filterInput.focus();
+      filterInput.value = tagName;
+      filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+      
+      // Trigger Enter key to apply the filter
+      setTimeout(() => {
+        filterInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      }, 300);
+    } else {
+      console.error(`n8n Folder View: Could not find any way to filter by tag "${tagName}"`);
+    }
   }
 }
 
@@ -742,63 +972,6 @@ function setupTagObserver() {
 }
 
 /**
- * Gets the sidebar element using various selectors to ensure compatibility.
- * 
- * @returns {Element|null} The sidebar element or null if not found.
- */
-function getSidebar() {
-  // Try different possible selectors for the sidebar
-  const sidebarSelectors = [
-    '#sidebar',
-    '[class*="sidebar"]',
-    '[class*="Sidebar"]',
-    '[id*="sidebar"]',
-    '[id*="Sidebar"]',
-    'aside', // n8n might use a semantic aside element for the sidebar
-    '[class*="nav"]', // Sometimes sidebars have nav-related class names
-    '[role="navigation"]', // Accessibility role
-    // n8n-specific selectors
-    '[data-test-id="main-sidebar"]',
-    '.el-menu',
-    '#app > div > div:first-child' // Common pattern in Vue apps like n8n
-  ];
-  
-  // Try each selector
-  for (const selector of sidebarSelectors) {
-    const element = document.querySelector(selector);
-    if (element) {
-      // Verify it's likely a sidebar by checking size and position
-      const rect = element.getBoundingClientRect();
-      // Most sidebars are tall and narrow, positioned at the left edge
-      if (rect.height > 200 && rect.width < 400 && rect.left < 100) {
-        console.log(`n8n Folder View: Found sidebar using selector: ${selector}`);
-        return element;
-      }
-    }
-  }
-  
-  // Fallback: look for the tallest, narrowest element on the left side
-  const possibleSidebars = Array.from(document.querySelectorAll('div, aside, nav'))
-    .filter(el => {
-      const rect = el.getBoundingClientRect();
-      return rect.height > 300 && rect.width < 300 && rect.left < 50;
-    })
-    .sort((a, b) => {
-      const rectA = a.getBoundingClientRect();
-      const rectB = b.getBoundingClientRect();
-      // Prefer taller, narrower elements
-      return (rectB.height / rectB.width) - (rectA.height / rectA.width);
-    });
-  
-  if (possibleSidebars.length > 0) {
-    console.log('n8n Folder View: Found sidebar using dimension heuristics');
-    return possibleSidebars[0];
-  }
-  
-  return null;
-}
-
-/**
  * Waits for the sidebar to be available in the DOM.
  * 
  * @param {number} maxAttempts - Maximum number of attempts to find the sidebar
@@ -984,12 +1157,12 @@ async function preserveFolderList(forceRefresh = false) {
 
 async function main() {
   try {
-    console.log('n8n Folder View: Starting extension');
+    console.log('n8n Folder View: Starting extension with custom sidebar');
     
-    // Create the container first, with loading spinner active
-    const containerCreated = await createInitialContainer();
-    if (!containerCreated) {
-      console.error('n8n Folder View: Failed to create initial container, retrying in 5 seconds');
+    // Create the custom sidebar
+    const sidebarCreated = await createCustomSidebar();
+    if (!sidebarCreated) {
+      console.error('n8n Folder View: Failed to create custom sidebar, retrying in 5 seconds');
       setTimeout(main, 5000);
       return;
     }
@@ -1016,6 +1189,12 @@ async function main() {
         state.selectedTag = 'All';
         saveState();
       }
+    }
+    
+    // Adjust main content area to make room for our sidebar
+    const mainContent = document.querySelector('#app > div > div:nth-child(2)');
+    if (mainContent) {
+      mainContent.style.marginLeft = '260px';
     }
   } catch (error) {
     console.error('n8n Folder View: Error in main function', error);
