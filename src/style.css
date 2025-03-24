@@ -86,6 +86,7 @@ aside[class*="sidebar"],
   z-index: 1; /* Lower z-index to ensure better integration */
   transition: background-color 0.2s;
   width: 100%;
+  -webkit-user-select: none; /* Safari support */
   user-select: none; /* Prevent text selection on clicks */
   box-sizing: border-box;
 }
@@ -517,6 +518,7 @@ aside[class*="sidebar"] #folder-view-container,
   margin-bottom: 0; /* Remove bottom margin since we're using dividers */
   cursor: pointer;
   transition: all 0.2s ease;
+  -webkit-user-select: none; /* Safari support */
   user-select: none;
   position: relative; /* For divider positioning */
   border-bottom: 1px solid rgba(255, 255, 255, 0.05); /* Add divider */
@@ -695,4 +697,58 @@ aside[class*="sidebar"] #folder-view-container,
 /* Adjust main content */
 body #app > div > div:nth-child(2) {
   transition: margin-left 0.3s ease;
+}
+
+/* Navigation Section */
+.sidebar-nav {
+  padding: 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nav-section {
+  padding: 10px 0;
+}
+
+.nav-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 0 24px;
+  margin: 10px 0;
+}
+
+.nav-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 24px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.nav-item.is-active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-item i {
+  margin-right: 12px;
+  font-size: 18px;
+  opacity: 0.9;
+}
+
+.nav-item span {
+  font-size: 14px;
 }

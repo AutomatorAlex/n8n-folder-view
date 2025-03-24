@@ -47,6 +47,39 @@ const TEMPLATES = {
         </div>
       </div>
       
+      <!-- Added n8n Navigation Links -->
+      <div class="sidebar-nav">
+        <div class="nav-section">
+          <h3>Navigate</h3>
+          <ul class="nav-links">
+            <li class="nav-item" data-path="/home/workflows">
+              <i class="mdi mdi-sitemap"></i>
+              <span>Workflows</span>
+            </li>
+            <li class="nav-item" data-external-url="true" data-path="https://n8n.io/workflows/">
+              <i class="mdi mdi-book-open-page-variant"></i>
+              <span>Templates</span>
+            </li>
+            <li class="nav-item" data-path="/home/credentials">
+              <i class="mdi mdi-key"></i>
+              <span>Credentials</span>
+            </li>
+            <li class="nav-item" data-path="/home/variables">
+              <i class="mdi mdi-variable"></i>
+              <span>Variables</span>
+            </li>
+            <li class="nav-item" data-path="/home/executions">
+              <i class="mdi mdi-chart-timeline-variant"></i>
+              <span>Executions</span>
+            </li>
+            <li class="nav-item" data-path="/settings">
+              <i class="mdi mdi-account-circle"></i>
+              <span>Settings</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+      
       <div class="sidebar-footer">
         <button id="folder-cleanup-btn" class="action-button">
           <i class="mdi mdi-broom"></i>Clean Up Unused Folders
@@ -314,6 +347,14 @@ async function waitForSidebar(maxAttempts = 20, interval = 500) {
 }
 
 /**
+ * Checks if the current page is a settings page
+ * @returns {boolean} True if on settings page
+ */
+function isSettingsPage() {
+  return window.location.pathname.startsWith('/settings');
+}
+
+/**
  * Creates the custom sidebar container that will replace the original n8n sidebar.
  * @returns {Promise<boolean>} Whether the container was successfully created
  */
@@ -332,9 +373,18 @@ async function createCustomSidebar() {
       return false;
     }
     
+    // Skip sidebar creation on settings pages
+    if (isSettingsPage()) {
+      console.log('n8n Folder View: On settings page, showing original sidebar');
+      originalSidebar.style.display = '';
+      return true;
+    }
+    
     // Check if we've already initialized the sidebar
     if (state.sidebarInitialized) {
       console.log('n8n Folder View: Sidebar already initialized');
+      // Still need to check if we should show/hide based on current page
+      toggleSidebarVisibility();
       return true;
     }
     
@@ -395,8 +445,33 @@ async function createCustomSidebar() {
       }
     }
     
+    // Add navigation functionality
+    const navItems = customSidebar.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+      item.addEventListener('click', () => {
+        const path = item.getAttribute('data-path');
+        if (path) {
+          if (item.getAttribute('data-external-url') === 'true') {
+            // For external URLs like templates
+            window.open(path, '_blank');
+          } else {
+            // For internal navigation
+            window.location.href = path;
+          }
+        }
+      });
+      
+      // Highlight current section
+      if (!item.getAttribute('data-external-url') && window.location.pathname.startsWith(item.getAttribute('data-path'))) {
+        item.classList.add('is-active');
+      }
+    });
+    
     // Set sidebar as initialized
     state.sidebarInitialized = true;
+    
+    // Setup navigation observer to toggle sidebar on navigation
+    setupNavigationObserver();
     
     // Make sure the loading spinner is visible
     const loadingSpinner = document.querySelector('#folder-loading');
@@ -418,6 +493,90 @@ async function createCustomSidebar() {
     console.error('n8n Folder View: Error creating custom sidebar', error);
     return false;
   }
+}
+
+/**
+ * Toggles visibility of custom vs original sidebar based on current page
+ */
+function toggleSidebarVisibility() {
+  const originalSidebar = document.querySelector('[data-test-id="main-sidebar"], #sidebar, aside[class*="sidebar"]');
+  const customSidebar = document.getElementById('n8n-custom-sidebar');
+  const mainContent = document.querySelector('#app > div > div:nth-child(2)');
+  
+  if (!originalSidebar || !customSidebar) return;
+  
+  const onSettingsPage = isSettingsPage();
+  console.log(`n8n Folder View: Toggling sidebar visibility - Settings page: ${onSettingsPage}, Path: ${window.location.pathname}`);
+  
+  if (onSettingsPage) {
+    // On settings page - show original sidebar, hide custom sidebar
+    originalSidebar.style.display = '';
+    customSidebar.style.display = 'none';
+    
+    // Reset main content margin
+    if (mainContent) {
+      mainContent.style.marginLeft = '';
+    }
+  } else {
+    // On regular pages - hide original sidebar, show custom sidebar
+    originalSidebar.style.display = 'none';
+    customSidebar.style.display = '';
+    
+    // Set main content margin for our custom sidebar
+    if (mainContent) {
+      mainContent.style.marginLeft = '260px';
+    }
+  }
+}
+
+/**
+ * Sets up an observer to detect navigation changes
+ */
+function setupNavigationObserver() {
+  // Use the History API to detect URL changes
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  
+  // Override pushState
+  history.pushState = function() {
+    originalPushState.apply(this, arguments);
+    console.log('n8n Folder View: pushState detected, updating sidebar');
+    setTimeout(toggleSidebarVisibility, 50);
+  };
+  
+  // Override replaceState
+  history.replaceState = function() {
+    originalReplaceState.apply(this, arguments);
+    console.log('n8n Folder View: replaceState detected, updating sidebar');
+    setTimeout(toggleSidebarVisibility, 50);
+  };
+  
+  // Listen for popstate events (back/forward navigation)
+  window.addEventListener('popstate', () => {
+    console.log('n8n Folder View: popstate detected, updating sidebar');
+    setTimeout(toggleSidebarVisibility, 50);
+  });
+  
+  // Also listen for hashchange events
+  window.addEventListener('hashchange', () => {
+    console.log('n8n Folder View: hashchange detected, updating sidebar');
+    setTimeout(toggleSidebarVisibility, 50);
+  });
+  
+  // Add periodic check to catch any navigation events we might have missed
+  setInterval(() => {
+    // Store the current path to detect changes
+    if (!window.n8nFolderViewLastPath) {
+      window.n8nFolderViewLastPath = window.location.pathname;
+    }
+    
+    // If path changed, update sidebar visibility
+    if (window.n8nFolderViewLastPath !== window.location.pathname) {
+      console.log(`n8n Folder View: Path changed from ${window.n8nFolderViewLastPath} to ${window.location.pathname}`);
+      window.n8nFolderViewLastPath = window.location.pathname;
+      toggleSidebarVisibility();
+    }
+  }, 1000); // Check every second
 }
 
 /**
@@ -1159,11 +1318,22 @@ async function main() {
   try {
     console.log('n8n Folder View: Starting extension with custom sidebar');
     
+    // Set initial path tracking to detect navigation
+    window.n8nFolderViewLastPath = window.location.pathname;
+    
     // Create the custom sidebar
     const sidebarCreated = await createCustomSidebar();
     if (!sidebarCreated) {
       console.error('n8n Folder View: Failed to create custom sidebar, retrying in 5 seconds');
       setTimeout(main, 5000);
+      return;
+    }
+    
+    // Make sure sidebar visibility is correctly set after initialization
+    toggleSidebarVisibility();
+    
+    // Don't continue with folder initialization if on settings page
+    if (isSettingsPage()) {
       return;
     }
     
